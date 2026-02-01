@@ -1,5 +1,7 @@
 import os
-from prompts_pro import build_system_prompt, build_user_message
+import prompts_pro
+build_system_prompt = prompts_pro.build_system_prompt
+build_user_message = prompts_pro.build_user_message
 import uuid
 import sqlite3
 import traceback
