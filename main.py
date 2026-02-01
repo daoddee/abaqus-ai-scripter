@@ -342,55 +342,119 @@ def api_retrieve(req: RetrieveRequest, request: Request):
 
 
 # -------------------- Main AI API (protected, optional RAG) --------------------
+from quality import validate_script, enforce_json, QualityError
+
 @app.post("/api/generate")
 def generate(req: GenerateRequest, request: Request):
     if not is_logged_in(request):
-        return JSONResponse({"ok": False, "error": "Not authenticated. Please log in."}, status_code=401)
+        return JSONResponse({"ok": False, "error": "Not authenticated."}, status_code=401)
 
-    try:
-        client = _client()
-        model = _model_name()
+    client = _client()
+    model = _model_name()
 
-        rag_enabled = bool(req.use_rag)
-        snippets = retrieve(req.prompt + " " + (req.code or ""), k=max(1, min(20, int(req.rag_k)))) if rag_enabled else []
-        reference_block = _format_snippets(snippets) if snippets else ""
+    rag_enabled = bool(req.use_rag)
+    snippets = []
+    if rag_enabled:
+        try:
+            snippets = retrieve(req.prompt + " " + (req.code or ""), k=req.rag_k)
+        except Exception:
+            snippets = []
 
-        sys = _system_prompt(req.mode, req.python_version, rag_enabled=rag_enabled)
+    reference_block = _format_snippets(snippets) if snippets else ""
 
-        if req.mode == "scripter":
-            user_msg = "USER REQUEST:\n" + req.prompt.strip() + "\n\n"
-        else:
-            code = (req.code or "").strip()
-            user_msg = (
-                "USER PROBLEM:\n"
-                + req.prompt.strip()
-                + "\n\nCODE:\n"
-                + (code if code else "(no code provided)")
-                + "\n\n"
-            )
+    rules = (
+        "STRICT RULES:\n"
+        "- If Python 2 is selected: NO f-strings, NO print(), NO numpy unless required.\n"
+        "- For ODB post-processing: use openOdb, fieldOutputs['S'], value.mises.\n"
+        "- If element sets are mentioned: MUST use getSubset(region=...).\n"
+        "- Search assembly AND all instances for sets.\n"
+        "- Do NOT invent Abaqus API methods.\n"
+    )
 
-        if rag_enabled and reference_block:
-            user_msg += "REFERENCE SNIPPETS (Abaqus docs):\n" + reference_block + "\n\n"
+    system_prompt = (
+        _system_prompt(req.mode, req.python_version, rag_enabled)
+        + "\n\n"
+        + rules
+        + "\n\n"
+        + "Return ONLY valid JSON with keys:\n"
+          "assumptions, plan, script, how_to_run.\n"
+          "Do not include markdown."
+    )
 
-        user_msg += "Return your answer in the required format."
+    user_msg = req.prompt.strip()
+    if req.code:
+        user_msg += "\n\nCODE:\n" + req.code
+
+    if reference_block:
+        user_msg += "\n\nREFERENCE SNIPPETS:\n" + reference_block
+
+    def call_model(feedback=None):
+        content = user_msg
+        if feedback:
+            content += "\n\nFIX THESE ISSUES:\n" + feedback
 
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": sys},
-                {"role": "user", "content": user_msg},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
             ],
             temperature=0.2,
         )
+        return resp.choices[0].message.content or ""
 
-        text = resp.choices[0].message.content or ""
-        return JSONResponse({"ok": True, "result": text, "rag_used": rag_enabled, "rag_hits": snippets[:6]})
+    # -------- First pass --------
+    raw = call_model()
 
-    except Exception as e:
-        return JSONResponse(
-            {"ok": False, "error": "Server error", "details": str(e) + "\n\n" + traceback.format_exc()},
-            status_code=500,
+    try:
+        data = enforce_json(raw)
+        errors, warnings = validate_script(
+            data["script"], req.python_version, req.prompt
         )
+
+        if errors:
+            raise QualityError("; ".join(errors))
+
+        return JSONResponse({
+            "ok": True,
+            "result": data,
+            "warnings": warnings,
+            "rag_used": rag_enabled,
+        })
+
+    except QualityError as e:
+        # -------- One self-repair retry --------
+        retry_raw = call_model(feedback=str(e))
+
+        try:
+            data = enforce_json(retry_raw)
+            errors, warnings = validate_script(
+                data["script"], req.python_version, req.prompt
+            )
+
+            if errors:
+                return JSONResponse({
+                    "ok": False,
+                    "error": "Generation failed quality checks",
+                    "details": errors,
+                    "warnings": warnings,
+                    "raw_output": data,
+                }, status_code=422)
+
+            return JSONResponse({
+                "ok": True,
+                "result": data,
+                "warnings": warnings,
+                "rag_used": rag_enabled,
+                "repaired": True,
+            })
+
+        except Exception as e2:
+            return JSONResponse({
+                "ok": False,
+                "error": "Generation failed after repair attempt",
+                "details": str(e2),
+            }, status_code=500)
 
 
 # -------------------- Upload API (protected) --------------------
