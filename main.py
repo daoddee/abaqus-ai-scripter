@@ -1,4 +1,5 @@
 import os
+from prompts_pro import build_system_prompt, build_user_message
 import uuid
 import sqlite3
 import traceback
@@ -344,7 +345,7 @@ def api_retrieve(req: RetrieveRequest, request: Request):
 # -------------------- Main AI API (protected, optional RAG) --------------------
 from quality import validate_script, enforce_json, QualityError
 
-@app.post("/api/generate")
+def generate(req: GenerateRequest, request: Request):@app.post("/api/generate")
 def generate(req: GenerateRequest, request: Request):
     if not is_logged_in(request):
         return JSONResponse({"ok": False, "error": "Not authenticated."}, status_code=401)
@@ -362,27 +363,19 @@ def generate(req: GenerateRequest, request: Request):
 
     reference_block = _format_snippets(snippets) if snippets else ""
 
-    rules = (
-        "STRICT RULES (HARD FAIL IF VIOLATED):\n"
-        "- If Python 2.7 selected: NO f-strings, NO print(), NO numpy, NO pathlib.\n"
-        "- Use Python 2.7 print statements and % formatting only, e.g.: print 'Max: %g' % x\n"
-        "- If prompt requests LAST STEP/LAST FRAME: explicitly pick last step name and last frame index.\n"
-        "  Do NOT loop all steps (no: for step in odb.steps.values()).\n"
-        "- If elset may be assembly OR instance level: search assembly.elementSets AND ALL instances[*].elementSets.\n"
-        "  Do NOT use instances.keys()[0].\n"
-        "- For ODB: use openOdb; use frame.fieldOutputs['S']; use value.mises; use frame.incrementNumber (NOT frameId).\n"
-        "- Do NOT invent Abaqus API methods.\n"
-        "- Return ONLY valid JSON with keys: assumptions, plan, script, how_to_run.\n"
-        "  No markdown. No extra keys.\n"
-    )
+# --- Professional system prompt (roles + rules + templates + self-check)
+system_prompt = build_system_prompt(
+    mode=req.mode,
+    python_version=req.python_version,
+    rag_enabled=rag_enabled,
+)
 
-    system_prompt = _system_prompt(req.mode, req.python_version, rag_enabled) + "\n\n" + rules
-
-    user_msg = (req.prompt or "").strip()
-    if req.code:
-        user_msg += "\n\nCODE:\n" + (req.code or "")
-    if reference_block:
-        user_msg += "\n\nREFERENCE SNIPPETS:\n" + reference_block
+# --- Professional user message (prompt + code + RAG snippets)
+user_msg = build_user_message(
+    prompt=req.prompt,
+    code=req.code,
+    reference_block=reference_block,
+)
 
     def call_model(feedback=None, temperature=0.2):
         content = user_msg
