@@ -50,22 +50,19 @@ const modalCancel = document.getElementById("modalCancel");
 const modalInputWrap = document.getElementById("modalInputWrap");
 const modalText = document.getElementById("modalText");
 
-let modalMode = "ok"; // "ok" | "prompt"
+let modalMode = "ok";
 let modalResolve = null;
 
 function openModal(title, body, opts = {}) {
   modalTitle.textContent = title;
   modalBody.textContent = body || "";
-
   modalMode = opts.mode || "ok";
   modalInputWrap.classList.toggle("hidden", modalMode !== "prompt");
-
   if (modalMode === "prompt") {
     modalText.value = opts.defaultValue || "";
     modalText.placeholder = opts.placeholder || "Type here...";
     setTimeout(() => modalText.focus(), 50);
   }
-
   modal.classList.remove("hidden");
   return new Promise((resolve) => { modalResolve = resolve; });
 }
@@ -85,7 +82,7 @@ modalOk.addEventListener("click", () => {
 });
 modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(null); });
 
-/* ---------- Output placeholder styling ---------- */
+/* ---------- Output ---------- */
 function setResult(text, isPlaceholder = false) {
   resultBox.textContent = text;
   resultBox.classList.toggle("placeholder", !!isPlaceholder);
@@ -98,16 +95,11 @@ function toggleSidebar() {
   appShell.classList.toggle("sidebar-collapsed");
   localStorage.setItem("sidebarCollapsed", appShell.classList.contains("sidebar-collapsed") ? "1" : "0");
 }
-
 sidebarToggleTop.addEventListener("click", toggleSidebar);
 sidebarCollapseBtn.addEventListener("click", toggleSidebar);
+if (localStorage.getItem("sidebarCollapsed") === "1") appShell.classList.add("sidebar-collapsed");
 
-// restore collapsed state
-if (localStorage.getItem("sidebarCollapsed") === "1") {
-  appShell.classList.add("sidebar-collapsed");
-}
-
-/* ---------- Local projects/tasks storage ---------- */
+/* ---------- Local projects/tasks ---------- */
 function loadJSON(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) || "") ?? fallback; }
   catch { return fallback; }
@@ -117,10 +109,7 @@ function saveJSON(key, value) { localStorage.setItem(key, JSON.stringify(value))
 function renderProjects() {
   const projects = loadJSON("projects", []);
   projectList.innerHTML = "";
-  if (!projects.length) {
-    emptyProjects.classList.remove("hidden");
-    return;
-  }
+  if (!projects.length) { emptyProjects.classList.remove("hidden"); return; }
   emptyProjects.classList.add("hidden");
   projects.forEach((p) => {
     const btn = document.createElement("button");
@@ -134,10 +123,7 @@ function renderProjects() {
 function renderTasks() {
   const tasks = loadJSON("tasks", []);
   taskList.innerHTML = "";
-  if (!tasks.length) {
-    emptyTasks.classList.remove("hidden");
-    return;
-  }
+  if (!tasks.length) { emptyTasks.classList.remove("hidden"); return; }
   emptyTasks.classList.add("hidden");
   tasks.slice().reverse().forEach((t) => {
     const btn = document.createElement("button");
@@ -150,7 +136,7 @@ function renderTasks() {
 
 function ensureTaskFromPrompt(prompt) {
   const tasks = loadJSON("tasks", []);
-  if (tasks.length) return; // only create first thread when user starts a conversation
+  if (tasks.length) return;
   const title = titleFromPrompt(prompt);
   tasks.push({ id: Date.now(), title });
   saveJSON("tasks", tasks);
@@ -180,30 +166,23 @@ renderTasks();
 newProjectBtn.addEventListener("click", async () => {
   const name = await openModal("New project", "Enter a project name:", {
     mode: "prompt",
-    placeholder: "e.g., Cantilever beam study"
+    placeholder: "e.g., Lap joint stiffness check"
   });
   if (!name) return;
-
   const projects = loadJSON("projects", []);
   projects.push({ id: Date.now(), name });
   saveJSON("projects", projects);
   renderProjects();
 });
 
-uploadBtn.addEventListener("click", () => {
-  fileInput.value = "";
-  fileInput.click();
-});
-
+uploadBtn.addEventListener("click", () => { fileInput.value = ""; fileInput.click(); });
 settingsBtn.addEventListener("click", () => openModal("Settings", "Settings UI coming next."));
 bellBtn.addEventListener("click", () => openModal("Notifications", "No notifications yet."));
 
 /* ---------- Dropdown ---------- */
 pyDropdownBtn.addEventListener("click", () => pyDropdownMenu.classList.toggle("open"));
 document.addEventListener("click", (e) => {
-  if (!pyDropdownMenu.contains(e.target) && !pyDropdownBtn.contains(e.target)) {
-    pyDropdownMenu.classList.remove("open");
-  }
+  if (!pyDropdownMenu.contains(e.target) && !pyDropdownBtn.contains(e.target)) pyDropdownMenu.classList.remove("open");
 });
 pyDropdownMenu.querySelectorAll(".dropdown-item").forEach((item) => {
   item.addEventListener("click", () => {
@@ -219,21 +198,13 @@ tabs.forEach((t) => {
     tabs.forEach(x => x.classList.remove("active"));
     t.classList.add("active");
     activeTab = t.getAttribute("data-tab");
-    if (activeTab === "scripter") {
-      panelScripter.classList.add("active");
-      panelDebugger.classList.remove("active");
-    } else {
-      panelDebugger.classList.add("active");
-      panelScripter.classList.remove("active");
-    }
+    if (activeTab === "scripter") { panelScripter.classList.add("active"); panelDebugger.classList.remove("active"); }
+    else { panelDebugger.classList.add("active"); panelScripter.classList.remove("active"); }
   });
 });
 
 /* ---------- Upload handling ---------- */
-attachBtn.addEventListener("click", () => {
-  fileInput.value = "";
-  fileInput.click();
-});
+attachBtn.addEventListener("click", () => { fileInput.value = ""; fileInput.click(); });
 
 fileInput.addEventListener("change", async () => {
   const files = Array.from(fileInput.files || []);
@@ -274,10 +245,7 @@ function currentQuery() {
 
 ragPeekBtn.addEventListener("click", async () => {
   const q = currentQuery();
-  if (!q) {
-    await openModal("RAG", "Type a request first, then click “Show retrieved snippets”.");
-    return;
-  }
+  if (!q) { await openModal("RAG", "Type a request first, then click “Show retrieved snippets”."); return; }
   try {
     const res = await fetch("/api/retrieve", {
       method: "POST",
@@ -285,10 +253,7 @@ ragPeekBtn.addEventListener("click", async () => {
       body: JSON.stringify({ query: q, k: 6 })
     });
     const data = await res.json();
-    if (!data.ok) {
-      await openModal("RAG retrieve failed", (data.error || "") + "\n\n" + (data.details || ""));
-      return;
-    }
+    if (!data.ok) { await openModal("RAG retrieve failed", (data.error || "") + "\n\n" + (data.details || "")); return; }
 
     const body = (data.hits || []).map((h, i) => {
       const t = (h.text || "").slice(0, 900);
@@ -301,6 +266,40 @@ ragPeekBtn.addEventListener("click", async () => {
   }
 });
 
+/* ---------- Render JSON result nicely ---------- */
+function formatResultPayload(payload) {
+  // Backend now returns: { assumptions, plan, script, how_to_run }
+  if (!payload || typeof payload !== "object") return String(payload || "");
+
+  const assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
+  const plan = Array.isArray(payload.plan) ? payload.plan : [];
+  const script = (payload.script || "").trim();
+  const how = (payload.how_to_run || "").trim();
+
+  let out = "";
+  out += "ASSUMPTIONS\n";
+  out += "-----------\n";
+  out += (assumptions.length ? assumptions.map(a => "- " + a).join("\n") : "(none)") + "\n\n";
+
+  out += "PLAN\n";
+  out += "----\n";
+  out += (plan.length ? plan.map(p => "- " + p).join("\n") : "(none)") + "\n\n";
+
+  out += "SCRIPT\n";
+  out += "------\n";
+  out += (script ? script : "(no script returned)") + "\n\n";
+
+  out += "HOW TO RUN\n";
+  out += "----------\n";
+  out += (how ? how : "(not provided)") + "\n\n";
+
+  out += "RAW JSON\n";
+  out += "--------\n";
+  out += JSON.stringify(payload, null, 2);
+
+  return out;
+}
+
 /* ---------- Generate ---------- */
 async function callGenerate(payload) {
   setResult("Thinking...", false);
@@ -311,11 +310,21 @@ async function callGenerate(payload) {
       body: JSON.stringify(payload),
     });
     const data = await res.json();
+
     if (!data.ok) {
-      setResult(`Error: ${data.error}\n\n${data.details || ""}`, false);
+      const details = Array.isArray(data.details) ? data.details.join("\n") : (data.details || "");
+      setResult(`Error: ${data.error}\n\n${details}`, false);
       return;
     }
-    setResult(data.result, false);
+
+    // If backend returns object in data.result, render it properly
+    const rendered = formatResultPayload(data.result);
+    setResult(rendered, false);
+
+    // show warnings if any
+    if (data.warnings && data.warnings.length) {
+      await openModal("Quality warnings", data.warnings.map(w => "• " + w).join("\n"));
+    }
 
     if (payload.use_rag && data.rag_hits && data.rag_hits.length) {
       const short = data.rag_hits.map((h, i) => {
@@ -332,9 +341,7 @@ async function callGenerate(payload) {
 sendBtn.addEventListener("click", async () => {
   const prompt = (promptInput.value || "").trim();
   if (!prompt) { setResult("Please type a prompt first.", false); return; }
-
   ensureTaskFromPrompt(prompt);
-
   await callGenerate({
     mode: "scripter",
     python_version: pythonVersion,
@@ -348,9 +355,7 @@ debugBtn.addEventListener("click", async () => {
   const prompt = (debugPrompt.value || "").trim();
   const code = (debugCode.value || "").trim();
   if (!prompt && !code) { setResult("Paste an error description and/or code to analyze.", false); return; }
-
   ensureTaskFromPrompt(prompt || code);
-
   await callGenerate({
     mode: "debugger",
     python_version: pythonVersion,
