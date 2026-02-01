@@ -356,18 +356,22 @@ def generate(req: GenerateRequest, request: Request):
     snippets = []
     if rag_enabled:
         try:
-            snippets = retrieve(req.prompt + " " + (req.code or ""), k=req.rag_k)
+            snippets = retrieve(req.prompt + " " + (req.code or ""), k=max(1, min(20, int(req.rag_k))))
         except Exception:
             snippets = []
 
     reference_block = _format_snippets(snippets) if snippets else ""
 
+    # Hard rules + examples to prevent py2 violations
     rules = (
-        "STRICT RULES:\n"
-        "- If Python 2 is selected: NO f-strings, NO print(), NO numpy unless required.\n"
-        "- For ODB post-processing: use openOdb, fieldOutputs['S'], value.mises.\n"
-        "- If element sets are mentioned: MUST use getSubset(region=...).\n"
-        "- Search assembly AND all instances for sets.\n"
+        "STRICT RULES (HARD FAIL IF VIOLATED):\n"
+        "- If Python 2.7 selected: NO f-strings, NO print(), NO numpy, NO pathlib.\n"
+        "- Use Python 2.7 print statements and %% formatting, e.g.:\n"
+        "  print('x') is NOT allowed. Use: print 'x' or print \"x\"\n"
+        "  Use formatting: print 'Max mises: %g' % max_mises\n"
+        "- For ODB: use from odbAccess import openOdb; use frame.fieldOutputs['S']; use value.mises.\n"
+        "- If element set is mentioned: MUST subset with getSubset(region=...).\n"
+        "- Must search assembly elementSets AND ALL instances elementSets; do NOT use instances.keys()[0].\n"
         "- Do NOT invent Abaqus API methods.\n"
     )
 
@@ -376,88 +380,70 @@ def generate(req: GenerateRequest, request: Request):
         + "\n\n"
         + rules
         + "\n\n"
-        + "Return ONLY valid JSON with keys:\n"
-          "assumptions, plan, script, how_to_run.\n"
-          "Do not include markdown."
+        + "Return ONLY valid JSON with keys: assumptions, plan, script, how_to_run.\n"
+          "No markdown. No extra keys. No commentary outside JSON."
     )
 
-    user_msg = req.prompt.strip()
+    user_msg = (req.prompt or "").strip()
     if req.code:
-        user_msg += "\n\nCODE:\n" + req.code
+        user_msg += "\n\nCODE:\n" + (req.code or "")
 
     if reference_block:
         user_msg += "\n\nREFERENCE SNIPPETS:\n" + reference_block
 
-    def call_model(feedback=None):
+    def call_model(feedback=None, temperature=0.2):
         content = user_msg
         if feedback:
-            content += "\n\nFIX THESE ISSUES:\n" + feedback
-
+            content += "\n\nFIX THESE ISSUES EXACTLY:\n" + feedback
+            content += "\n\nREMINDER (Python 2.7): no f-strings; no print(); use print 'text' and % formatting.\n"
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content},
             ],
-            temperature=0.2,
+            temperature=temperature,
         )
         return resp.choices[0].message.content or ""
 
-    # -------- First pass --------
-    raw = call_model()
+    # attempt 1
+    raw = call_model(temperature=0.2)
+
+    def try_validate(raw_text):
+        data = enforce_json(raw_text)
+        errors, warnings = validate_script(data["script"], req.python_version, req.prompt)
+        return data, errors, warnings
 
     try:
-        data = enforce_json(raw)
-        errors, warnings = validate_script(
-            data["script"], req.python_version, req.prompt
-        )
-
+        data, errors, warnings = try_validate(raw)
         if errors:
             raise QualityError("; ".join(errors))
-
-        return JSONResponse({
-            "ok": True,
-            "result": data,
-            "warnings": warnings,
-            "rag_used": rag_enabled,
-        })
-
+        return JSONResponse({"ok": True, "result": data, "warnings": warnings, "rag_used": rag_enabled})
     except QualityError as e:
-        # -------- One self-repair retry --------
-        retry_raw = call_model(feedback=str(e))
-
+        # attempt 2 (repair, deterministic)
+        raw2 = call_model(feedback=str(e), temperature=0.0)
         try:
-            data = enforce_json(retry_raw)
-            errors, warnings = validate_script(
-                data["script"], req.python_version, req.prompt
-            )
-
-            if errors:
-                return JSONResponse({
-                    "ok": False,
-                    "error": "Generation failed quality checks",
-                    "details": errors,
-                    "warnings": warnings,
-                    "raw_output": data,
-                }, status_code=422)
-
-            return JSONResponse({
-                "ok": True,
-                "result": data,
-                "warnings": warnings,
-                "rag_used": rag_enabled,
-                "repaired": True,
-            })
-
-        except Exception as e2:
-            return JSONResponse({
-                "ok": False,
-                "error": "Generation failed after repair attempt",
-                "details": str(e2),
-            }, status_code=500)
+            data2, errors2, warnings2 = try_validate(raw2)
+            if errors2:
+                raise QualityError("; ".join(errors2))
+            return JSONResponse({"ok": True, "result": data2, "warnings": warnings2, "rag_used": rag_enabled, "repaired": True})
+        except QualityError as e2:
+            # attempt 3 (final repair, slightly more guidance)
+            fb = str(e2) + "\n\nIf you used f-strings, replace them with % formatting. If you used print(), replace with print statements."
+            raw3 = call_model(feedback=fb, temperature=0.0)
+            try:
+                data3, errors3, warnings3 = try_validate(raw3)
+                if errors3:
+                    return JSONResponse(
+                        {"ok": False, "error": "Generation failed quality checks", "details": errors3, "warnings": warnings3, "raw_output": data3},
+                        status_code=422,
+                    )
+                return JSONResponse({"ok": True, "result": data3, "warnings": warnings3, "rag_used": rag_enabled, "repaired": True})
+            except Exception as e3:
+                return JSONResponse({"ok": False, "error": "Generation failed after repair attempts", "details": str(e3)}, status_code=500)
 
 
-# -------------------- Upload API (protected) --------------------
+
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
