@@ -20,8 +20,10 @@ def _load():
     if _vectorizer is not None:
         return
 
-    if not os.path.exists(CHUNKS_PATH) or not os.path.exists(VECTORIZER_PATH) or not os.path.exists(MATRIX_PATH):
-        raise RuntimeError("RAG TF-IDF index not found. Run: python kb/build_index.py (locally) and commit kb/index/")
+    if not (os.path.exists(CHUNKS_PATH) and os.path.exists(VECTORIZER_PATH) and os.path.exists(MATRIX_PATH)):
+        raise RuntimeError(
+            "RAG TF-IDF index not found. Run: python kb/build_index.py (locally) and commit kb/index/"
+        )
 
     _chunks = []
     with open(CHUNKS_PATH, "r", encoding="utf-8") as f:
@@ -40,24 +42,26 @@ def retrieve(query: str, k: int = 6) -> List[Dict]:
     if not q:
         return []
 
-    qv = _vectorizer.transform([q])           # (1, vocab)
-    scores = (qv @ _matrix.T).toarray()[0]    # cosine-ish since tfidf is L2-normalized by default
+    qv = _vectorizer.transform([q])          # (1, vocab)
+    scores = (qv @ _matrix.T).toarray()[0]   # similarity
 
     if scores.size == 0:
         return []
 
     k = max(1, min(int(k), 20))
-    # top-k indices
-    idxs = np.argpartition(-scores, kth=min(k, len(scores)-1))[:k]
+    topk = min(k, len(scores))
+    idxs = np.argpartition(-scores, kth=topk-1)[:topk]
     idxs = idxs[np.argsort(-scores[idxs])]
 
     results = []
     for idx in idxs.tolist():
         c = _chunks[idx]
-        results.append({
-            "score": float(scores[idx]),
-            "source": c.get("source"),
-            "chunk_index": c.get("chunk_index"),
-            "text": c.get("text"),
-        })
+        results.append(
+            {
+                "score": float(scores[idx]),
+                "source": c.get("source"),
+                "chunk_index": c.get("chunk_index"),
+                "text": c.get("text"),
+            }
+        )
     return results

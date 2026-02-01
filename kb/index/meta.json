@@ -1,6 +1,5 @@
 {
-  "model": "sentence-transformers/all-MiniLM-L6-v2",
-  "dim": 384,
+  "backend": "tfidf",
   "chunk_chars": 1200,
   "chunk_overlap": 200,
   "num_files": 2,
