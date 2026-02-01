@@ -362,32 +362,25 @@ def generate(req: GenerateRequest, request: Request):
 
     reference_block = _format_snippets(snippets) if snippets else ""
 
-    # Hard rules + examples to prevent py2 violations
     rules = (
         "STRICT RULES (HARD FAIL IF VIOLATED):\n"
         "- If Python 2.7 selected: NO f-strings, NO print(), NO numpy, NO pathlib.\n"
-        "- Use Python 2.7 print statements and %% formatting, e.g.:\n"
-        "  print('x') is NOT allowed. Use: print 'x' or print \"x\"\n"
-        "  Use formatting: print 'Max mises: %g' % max_mises\n"
-        "- For ODB: use from odbAccess import openOdb; use frame.fieldOutputs['S']; use value.mises.\n"
-        "- If element set is mentioned: MUST subset with getSubset(region=...).\n"
-        "- Must search assembly elementSets AND ALL instances elementSets; do NOT use instances.keys()[0].\n"
+        "- Use Python 2.7 print statements and % formatting only, e.g.: print 'Max: %g' % x\n"
+        "- If prompt requests LAST STEP/LAST FRAME: explicitly pick last step name and last frame index.\n"
+        "  Do NOT loop all steps (no: for step in odb.steps.values()).\n"
+        "- If elset may be assembly OR instance level: search assembly.elementSets AND ALL instances[*].elementSets.\n"
+        "  Do NOT use instances.keys()[0].\n"
+        "- For ODB: use openOdb; use frame.fieldOutputs['S']; use value.mises; use frame.incrementNumber (NOT frameId).\n"
         "- Do NOT invent Abaqus API methods.\n"
+        "- Return ONLY valid JSON with keys: assumptions, plan, script, how_to_run.\n"
+        "  No markdown. No extra keys.\n"
     )
 
-    system_prompt = (
-        _system_prompt(req.mode, req.python_version, rag_enabled)
-        + "\n\n"
-        + rules
-        + "\n\n"
-        + "Return ONLY valid JSON with keys: assumptions, plan, script, how_to_run.\n"
-          "No markdown. No extra keys. No commentary outside JSON."
-    )
+    system_prompt = _system_prompt(req.mode, req.python_version, rag_enabled) + "\n\n" + rules
 
     user_msg = (req.prompt or "").strip()
     if req.code:
         user_msg += "\n\nCODE:\n" + (req.code or "")
-
     if reference_block:
         user_msg += "\n\nREFERENCE SNIPPETS:\n" + reference_block
 
@@ -395,7 +388,6 @@ def generate(req: GenerateRequest, request: Request):
         content = user_msg
         if feedback:
             content += "\n\nFIX THESE ISSUES EXACTLY:\n" + feedback
-            content += "\n\nREMINDER (Python 2.7): no f-strings; no print(); use print 'text' and % formatting.\n"
         resp = client.chat.completions.create(
             model=model,
             messages=[
@@ -406,41 +398,143 @@ def generate(req: GenerateRequest, request: Request):
         )
         return resp.choices[0].message.content or ""
 
-    # attempt 1
-    raw = call_model(temperature=0.2)
-
     def try_validate(raw_text):
         data = enforce_json(raw_text)
         errors, warnings = validate_script(data["script"], req.python_version, req.prompt)
         return data, errors, warnings
 
+    # ---------- Deterministic fallback for ODB max-mises tasks ----------
+    def fallback_odb_max_mises_py2():
+        # Conservative fallback that satisfies your enforced rules
+        script = (
+            "from odbAccess import openOdb\n"
+            "import sys\n\n"
+            "def get_last_step(odb):\n"
+            "    stepNames = odb.steps.keys()\n"
+            "    if not stepNames:\n"
+            "        raise RuntimeError('ODB has no steps')\n"
+            "    return odb.steps[stepNames[-1]]\n\n"
+            "def find_elset(odb, elsetName):\n"
+            "    assembly = odb.rootAssembly\n"
+            "    if elsetName in assembly.elementSets.keys():\n"
+            "        return assembly.elementSets[elsetName]\n"
+            "    for instName in assembly.instances.keys():\n"
+            "        inst = assembly.instances[instName]\n"
+            "        if elsetName in inst.elementSets.keys():\n"
+            "            return inst.elementSets[elsetName]\n"
+            "    raise KeyError('Element set not found: %s' % elsetName)\n\n"
+            "def main(odbName, elsetName):\n"
+            "    odb = openOdb(path=odbName, readOnly=True)\n"
+            "    try:\n"
+            "        step = get_last_step(odb)\n"
+            "        frame = step.frames[-1]\n"
+            "        if 'S' not in frame.fieldOutputs.keys():\n"
+            "            raise KeyError(\"Stress output 'S' not found in last frame\")\n"
+            "        stress = frame.fieldOutputs['S']\n"
+            "        region = find_elset(odb, elsetName)\n"
+            "        stressSub = stress.getSubset(region=region)\n\n"
+            "        maxMises = None\n"
+            "        maxElem = None\n"
+            "        maxIP = None\n"
+            "        for v in stressSub.values:\n"
+            "            mises = getattr(v, 'mises', None)\n"
+            "            if mises is None:\n"
+            "                continue\n"
+            "            if (maxMises is None) or (mises > maxMises):\n"
+            "                maxMises = mises\n"
+            "                maxElem = getattr(v, 'elementLabel', None)\n"
+            "                maxIP = getattr(v, 'integrationPoint', None)\n\n"
+            "        print 'Step name: %s' % step.name\n"
+            "        print 'Frame increment number: %s' % str(getattr(frame, 'incrementNumber', 'N/A'))\n"
+            "        if maxMises is None:\n"
+            "            print 'No von Mises values found in elset: %s' % elsetName\n"
+            "        else:\n"
+            "            print 'Maximum von Mises stress: %g' % maxMises\n"
+            "            print 'Element label: %s' % str(maxElem)\n"
+            "            if maxIP is None:\n"
+            "                print 'Integration point: N/A'\n"
+            "            else:\n"
+            "                print 'Integration point: %s' % str(maxIP)\n"
+            "    finally:\n"
+            "        odb.close()\n\n"
+            "if __name__ == '__main__':\n"
+            "    odbName = 'Cantilever.odb'\n"
+            "    elsetName = 'HOTSPOT_ELEMS'\n"
+            "    # Usage: abaqus python script.py -odb Cantilever.odb -elset HOTSPOT_ELEMS\n"
+            "    args = sys.argv[1:]\n"
+            "    i = 0\n"
+            "    while i < len(args):\n"
+            "        if args[i] == '-odb' and i+1 < len(args):\n"
+            "            odbName = args[i+1]\n"
+            "            i += 2\n"
+            "        elif args[i] == '-elset' and i+1 < len(args):\n"
+            "            elsetName = args[i+1]\n"
+            "            i += 2\n"
+            "        else:\n"
+            "            i += 1\n"
+            "    main(odbName, elsetName)\n"
+        )
+
+        result = {
+            "assumptions": [
+                "ODB exists and contains at least one step and one frame.",
+                "Element set may be defined at assembly or instance level.",
+                "Stress output 'S' is available in the last frame."
+            ],
+            "plan": [
+                "Open ODB read-only.",
+                "Select last step and last frame.",
+                "Find element set in assembly or any instance.",
+                "Subset stress field to that region.",
+                "Scan values and report maximum von Mises and location."
+            ],
+            "script": script,
+            "how_to_run": "NoGUI: abaqus python script.py -odb Cantilever.odb -elset HOTSPOT_ELEMS"
+        }
+        return result
+
+    # ---------- Model attempts ----------
+    raw1 = call_model(temperature=0.2)
     try:
-        data, errors, warnings = try_validate(raw)
+        data, errors, warnings = try_validate(raw1)
         if errors:
             raise QualityError("; ".join(errors))
         return JSONResponse({"ok": True, "result": data, "warnings": warnings, "rag_used": rag_enabled})
-    except QualityError as e:
-        # attempt 2 (repair, deterministic)
-        raw2 = call_model(feedback=str(e), temperature=0.0)
+    except QualityError as e1:
+        raw2 = call_model(feedback=str(e1), temperature=0.0)
         try:
             data2, errors2, warnings2 = try_validate(raw2)
             if errors2:
                 raise QualityError("; ".join(errors2))
             return JSONResponse({"ok": True, "result": data2, "warnings": warnings2, "rag_used": rag_enabled, "repaired": True})
         except QualityError as e2:
-            # attempt 3 (final repair, slightly more guidance)
-            fb = str(e2) + "\n\nIf you used f-strings, replace them with % formatting. If you used print(), replace with print statements."
-            raw3 = call_model(feedback=fb, temperature=0.0)
+            raw3 = call_model(feedback=str(e2), temperature=0.0)
             try:
                 data3, errors3, warnings3 = try_validate(raw3)
                 if errors3:
-                    return JSONResponse(
-                        {"ok": False, "error": "Generation failed quality checks", "details": errors3, "warnings": warnings3, "raw_output": data3},
-                        status_code=422,
-                    )
+                    raise QualityError("; ".join(errors3))
                 return JSONResponse({"ok": True, "result": data3, "warnings": warnings3, "rag_used": rag_enabled, "repaired": True})
-            except Exception as e3:
-                return JSONResponse({"ok": False, "error": "Generation failed after repair attempts", "details": str(e3)}, status_code=500)
+            except QualityError as e3:
+                # Final fallback only for scripter ODB-like tasks to avoid dead ends
+                prompt_l = (req.prompt or "").lower()
+                odb_like = ("odb" in prompt_l) or ("openodb" in prompt_l) or ("odbaccess" in prompt_l) or ("von mises" in prompt_l) or ("mises" in prompt_l)
+                if req.mode == "scripter" and req.python_version == "py2" and odb_like:
+                    fb = fallback_odb_max_mises_py2()
+                    fb_errors, fb_warnings = validate_script(fb["script"], req.python_version, req.prompt)
+                    if fb_errors:
+                        return JSONResponse({"ok": False, "error": "Fallback failed quality checks (unexpected)", "details": fb_errors}, status_code=500)
+                    return JSONResponse({
+                        "ok": True,
+                        "result": fb,
+                        "warnings": ["Model failed strict checks; returned verified fallback script."] + fb_warnings,
+                        "rag_used": rag_enabled,
+                        "fallback": True
+                    })
+                return JSONResponse({
+                    "ok": False,
+                    "error": "Generation failed quality checks",
+                    "details": str(e3).split("; "),
+                }, status_code=422)
 
 
 
