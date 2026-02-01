@@ -29,6 +29,9 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "users.db")
 EMAIL_LIST_PATH = os.path.join(DATA_DIR, "emails.txt")
 
+# Admin token for downloading emails (set in Railway Variables)
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
+
 app = FastAPI(title="Abaqus AI Scripter")
 
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-secret-change-me")
@@ -166,6 +169,38 @@ def logout(request: Request):
     return RedirectResponse(url="/login", status_code=302)
 
 
+# -------------------- Admin: download emails --------------------
+@app.get("/admin/emails")
+def admin_emails(request: Request):
+    """
+    Download the emails.txt file.
+    Protect with a token:
+      /admin/emails?token=YOUR_ADMIN_TOKEN
+    """
+    token = (request.query_params.get("token") or "").strip()
+
+    if not ADMIN_TOKEN:
+        return JSONResponse(
+            {"ok": False, "error": "ADMIN_TOKEN not set on server."},
+            status_code=500
+        )
+
+    if token != ADMIN_TOKEN:
+        return JSONResponse({"ok": False, "error": "Unauthorized."}, status_code=401)
+
+    if not os.path.exists(EMAIL_LIST_PATH):
+        # Return an empty file to keep UX smooth
+        os.makedirs(os.path.dirname(EMAIL_LIST_PATH), exist_ok=True)
+        with open(EMAIL_LIST_PATH, "w", encoding="utf-8") as f:
+            f.write("")
+
+    return FileResponse(
+        EMAIL_LIST_PATH,
+        media_type="text/plain",
+        filename="emails.txt",
+    )
+
+
 # -------------------- Auth API --------------------
 @app.post("/api/signup")
 def signup(req: SignupRequest, request: Request):
@@ -190,10 +225,8 @@ def signup(req: SignupRequest, request: Request):
         finally:
             conn.close()
 
-        # Save email locally on your computer:
         append_email_list(email)
 
-        # Auto-login
         request.session["user_email"] = email
         return JSONResponse({"ok": True})
 
@@ -240,7 +273,7 @@ def me(request: Request):
 def _client() -> OpenAI:
     key = os.getenv("OPENAI_API_KEY")
     if not key:
-        raise RuntimeError('OPENAI_API_KEY is not set. Use: export OPENAI_API_KEY="sk-..."')
+        raise RuntimeError('OPENAI_API_KEY is not set. Use environment variable on Railway.')
     return OpenAI(api_key=key)
 
 
