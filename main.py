@@ -345,7 +345,9 @@ def api_retrieve(req: RetrieveRequest, request: Request):
 # -------------------- Main AI API (protected, optional RAG) --------------------
 from quality import validate_script, enforce_json, QualityError
 
-def generate(req: GenerateRequest, request: Request):@app.post("/api/generate")
+@app.post("/api/generate")
+def generate(req: GenerateRequest, request: Request):
+    pass  # TEMP: placeholder to fix indentation
 def generate(req: GenerateRequest, request: Request):
     if not is_logged_in(request):
         return JSONResponse({"ok": False, "error": "Not authenticated."}, status_code=401)
@@ -363,19 +365,19 @@ def generate(req: GenerateRequest, request: Request):
 
     reference_block = _format_snippets(snippets) if snippets else ""
 
-# --- Professional system prompt (roles + rules + templates + self-check)
-system_prompt = build_system_prompt(
+    # --- Professional system prompt (roles + rules + templates + self-check)
+    system_prompt = build_system_prompt(
     mode=req.mode,
     python_version=req.python_version,
     rag_enabled=rag_enabled,
-)
+    )
 
-# --- Professional user message (prompt + code + RAG snippets)
-user_msg = build_user_message(
+    # --- Professional user message (prompt + code + RAG snippets)
+    user_msg = build_user_message(
     prompt=req.prompt,
     code=req.code,
     reference_block=reference_block,
-)
+    )
 
     def call_model(feedback=None, temperature=0.2):
         content = user_msg
