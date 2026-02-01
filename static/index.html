@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Abaqus AI Scripter</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-left">
+          <div class="brand-mark">▦</div>
+          <div class="brand-name">abaqus ai</div>
+        </div>
+        <button class="collapse-btn" id="sidebarCollapseBtn" title="Collapse">⟨</button>
+      </div>
+
+      <button class="sidebar-btn primary" id="newProjectBtn">
+        <span class="icon">＋</span>
+        <span class="label">New project</span>
+      </button>
+
+      <button class="sidebar-btn" id="uploadBtn">
+        <span class="icon">⬆</span>
+        <span class="label">Upload</span>
+      </button>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Projects</div>
+        <div class="project-list" id="projectList"></div>
+        <div class="empty-projects" id="emptyProjects">No projects yet</div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Abaqus scripts</div>
+        <div class="task-list" id="taskList"></div>
+        <div class="empty-tasks" id="emptyTasks">Start a conversation to create a script thread</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="sidebar-footer-btn" id="settingsBtn">
+          Settings
+          <span class="muted">App preferences</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="topbar-icon" id="sidebarToggleTop" title="Toggle sidebar">☰</button>
+
+          <div class="dropdown">
+            <button class="dropdown-btn" id="pyDropdownBtn" title="Select Python version">
+              <span id="pyDropdownLabel">Python 3 (newer Abaqus)</span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="dropdown-menu" id="pyDropdownMenu">
+              <button class="dropdown-item" data-py="py3">
+                <div class="item-title">Python 3</div>
+                <div class="item-sub">Newer Abaqus releases</div>
+              </button>
+              <button class="dropdown-item" data-py="py2">
+                <div class="item-title">Python 2.7</div>
+                <div class="item-sub">Older Abaqus releases</div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <button class="topbar-icon" id="bellBtn" title="Notifications">🔔</button>
+          <a class="topbar-link" href="/logout" title="Logout">Logout</a>
+          <div class="avatar" title="Profile">O</div>
+        </div>
+      </header>
+
+      <section class="content">
+        <div class="hero">
+          <h1>What can I do for you?</h1>
+
+          <div class="tabs">
+            <button class="tab active" data-tab="scripter">Scripter</button>
+            <button class="tab" data-tab="debugger">Code Debugger</button>
+          </div>
+
+          <!-- RAG controls -->
+          <div class="rag-row">
+            <label class="rag-toggle">
+              <input type="checkbox" id="ragToggle" />
+              <span>Use RAG (Abaqus docs)</span>
+            </label>
+            <button class="btn subtle" id="ragPeekBtn">Show retrieved snippets</button>
+          </div>
+
+          <div class="panel active" id="panel-scripter">
+            <div class="composer">
+              <textarea id="promptInput" placeholder="Assign a task or ask anything"></textarea>
+              <div class="composer-actions">
+                <button class="chip" id="attachBtn" title="Upload files">＋</button>
+                <div class="spacer"></div>
+                <button class="send" id="sendBtn" title="Send">↑</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" id="panel-debugger">
+            <div class="split">
+              <div class="card">
+                <div class="card-title">Describe the error</div>
+                <textarea id="debugPrompt" placeholder="Paste the error message / what you expected..."></textarea>
+              </div>
+              <div class="card">
+                <div class="card-title">Paste your Abaqus script</div>
+                <textarea id="debugCode" class="mono" placeholder="Paste your .py here..."></textarea>
+              </div>
+            </div>
+            <div class="debug-actions">
+              <button class="btn" id="debugBtn">Analyze</button>
+            </div>
+          </div>
+
+          <div class="result-wrap">
+            <div class="result-head">
+              <div class="result-title">Output</div>
+              <div class="result-actions">
+                <button class="btn subtle" id="copyBtn">Copy</button>
+                <button class="btn subtle" id="clearBtn">Clear</button>
+              </div>
+            </div>
+            <pre class="result placeholder" id="resultBox">(results will appear here)</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <input type="file" id="fileInput" class="hidden" multiple />
+
+  <!-- Modal -->
+  <div class="modal hidden" id="modal">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div class="modal-title" id="modalTitle">Title</div>
+        <button class="modal-x" id="modalClose" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modal-body" id="modalBody">Body</div>
+
+      <div class="modal-input hidden" id="modalInputWrap">
+        <input class="modal-text" id="modalText" type="text" placeholder="Type here..." />
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn subtle" id="modalCancel">Cancel</button>
+        <button class="btn" id="modalOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

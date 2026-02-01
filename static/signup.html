@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sign up — Abaqus AI Scripter</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="auth-mark">▦</div>
+        <div class="auth-name">abaqus ai</div>
+      </div>
+
+      <h2 class="auth-title">Create account</h2>
+      <p class="auth-sub">Sign up to start scripting.</p>
+
+      <div class="auth-form">
+        <label class="auth-label">Email</label>
+        <input class="auth-input" id="email" type="email" placeholder="you@example.com" />
+
+        <label class="auth-label">Password</label>
+        <input class="auth-input" id="password" type="password" placeholder="Minimum 8 characters" />
+
+        <button class="auth-btn" id="signupBtn">Sign up</button>
+        <div class="auth-error" id="err"></div>
+
+        <div class="auth-footer">
+          Already have an account?
+          <a class="auth-link" href="/login">Log in</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const err = document.getElementById("err");
+
+    async function doSignup() {
+      err.textContent = "";
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      if (!email || !password) {
+        err.textContent = "Please enter email and password.";
+        return;
+      }
+
+      const res = await fetch("/api/signup", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await res.json();
+      if (!data.ok) {
+        err.textContent = data.error || "Signup failed.";
+        return;
+      }
+
+      window.location.href = "/";
+    }
+
+    document.getElementById("signupBtn").addEventListener("click", doSignup);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doSignup();
+    });
+  </script>
+</body>
+</html>

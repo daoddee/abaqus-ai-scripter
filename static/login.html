@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Login — Abaqus AI Scripter</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="auth-mark">▦</div>
+        <div class="auth-name">abaqus ai</div>
+      </div>
+
+      <h2 class="auth-title">Welcome back</h2>
+      <p class="auth-sub">Log in to continue.</p>
+
+      <div class="auth-form">
+        <label class="auth-label">Email</label>
+        <input class="auth-input" id="email" type="email" placeholder="you@example.com" />
+
+        <label class="auth-label">Password</label>
+        <input class="auth-input" id="password" type="password" placeholder="••••••••" />
+
+        <button class="auth-btn" id="loginBtn">Log in</button>
+        <div class="auth-error" id="err"></div>
+
+        <div class="auth-footer">
+          No account?
+          <a class="auth-link" href="/signup">Sign up</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const err = document.getElementById("err");
+
+    async function doLogin() {
+      err.textContent = "";
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      if (!email || !password) {
+        err.textContent = "Please enter email and password.";
+        return;
+      }
+
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await res.json();
+      if (!data.ok) {
+        err.textContent = data.error || "Login failed.";
+        return;
+      }
+
+      window.location.href = "/";
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", doLogin);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doLogin();
+    });
+  </script>
+</body>
+</html>
